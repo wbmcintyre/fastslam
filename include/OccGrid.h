@@ -26,6 +26,8 @@ class OccGrid {
     float getResolution();
     int getWidth();
     int getHeight();
+    float getRobotXOffset();
+    float getRobotYOffset();
 
 };
 

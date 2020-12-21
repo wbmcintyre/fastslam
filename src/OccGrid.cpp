@@ -37,16 +37,17 @@ float OccGrid::getWeightByMeasurements(std::array<float,3> pose, LaserScanner sc
   std::vector<float> globalVals;
   std::vector<float> localVals;
   float angleMin = scanner.getAngleMin();
+  float angleMax = scanner.getAngleMax();
   float angleInc = scanner.getAngleInc();
   float rangeMax = scanner.getRangeMax();
   float rangeMin = scanner.getRangeMin();
   //get min and max X and Y values so the entire grid doesn't need to be searched
 
   for(int k = 0; k < scanner.getScanSize(); k++){
-    if(scanner.getScan(k) < rangeMax && scanner.getScan(k) > rangeMin){   //filter out bad laser scanner values
-      float r = scanner.getScan(k);
-      x = int(round(pose[0] + r*cos(angleMin+(k*angleInc))));   //global map coordinates
-      y = int(round(pose[1] + r*sin(angleMin+(k*angleInc))));
+    float r = scanner.getScan(k);
+    if(r < rangeMax && r > rangeMin){   //filter out bad laser scanner values
+      x = int(round((pose[0] + r*cos(pose[2]+angleMin+(k*angleInc)))/resolution));   //global map coordinates of scan
+      y = int(round((pose[1] + r*sin(pose[2]+angleMin+(k*angleInc)))/resolution));
 
       //get the min and max X and Y values
       if(x > maxX) {
@@ -62,30 +63,35 @@ float OccGrid::getWeightByMeasurements(std::array<float,3> pose, LaserScanner sc
         minY = y;
       }
     }
+
   }
-
-  ROS_INFO("minX = %d, maxX = %d, minY = %d, maxY = %d", minX*(int)(1/resolution)+(int)robotXOffset, maxX*(int)(1/resolution)+(int)robotXOffset,
-    minY*(int)(1/resolution)+(int)robotYOffset, maxY*(int)(1/resolution)+(int)robotYOffset);
-
+  //ROS_INFO("minX = %d, maxX = %d, minY = %d, maxY = %d", minX, maxX, minY, maxY);
+  //to prevent segmentation faults, we limit the search to the map boundaries
+  if(maxX > map.size()){ maxX = map.size(); }
+  if(maxY > map.size()){ maxY = map[0].size(); }
+  if(minX < 0){ minX = 0; }
+  if(minY < 0){ minY = 0; }
   //look within the min and max X and Y coordinates for map matching
-  for(int i = minX*(int)(1/resolution)+(int)robotXOffset; i <= maxX*(int)(1/resolution)+(int)robotXOffset; i++){
-    for(int j = minY*(int)(1/resolution)+(int)robotYOffset; j <= maxY*(int)(1/resolution)+(int)robotYOffset; j++){
+  for(int i = minX; i <= maxX; i++){
+    for(int j = minY; j <= maxY; j++){
       //calculate center of mass of grid marker
       if(map[i][j] != -1) {
-        float xi = resolution*(i-0.5);  //grid cell center of mass
-        float yi = resolution*(j-0.5);
+        float xi = resolution*((i+1)-0.5);  //grid cell center of mass
+        float yi = resolution*((j+1)-0.5);
         float r = sqrt(pow(xi - pose[0], 2) + pow(yi - pose[1], 2)); //distance from robot to grid cell
-        if(r < scanner.getRangeMax() && r > scanner.getRangeMin()){      //if scanner is within range of cell (don't check cells that aren't in scanner range)
-
-          float phi = atan2(yi - pose[1], xi - pose[0]) - pose[2]; //sensorTheta = measurementTheta - robotTheta (robotTheta is 0 when aligned with Y axis)
-          if(phi > scanner.getAngleMin() && phi < scanner.getAngleMax()) {  //check if phi is within range of sensor scan
-            int senseIndex = int(round((phi - scanner.getAngleMin())/scanner.getAngleInc())); //offsetting sensor angles so they start at 0 for estimating sensor index of angle phi
-            float senseAngle = scanner.getAngleMin() + senseIndex*scanner.getAngleInc(); //get true sensor angle based on index
+        if(r < rangeMax && r > rangeMin){      //if scanner is within range of cell (don't check cells that aren't in scanner range)
+          float phi = atan2(yi - pose[1], xi - pose[0]) - pose[2]; //sensorTheta = measurementTheta - robotTheta (robotTheta and measurementTheta are 0 when aligned with X axis)
+          if(phi < 0){  //sensor range doesn't check negative values but atan2 returns negative values
+            phi += M_PI;
+          }
+          if(phi > angleMin && phi < angleMax) {  //check if phi is within range of sensor scan
+            int senseIndex = int(round((phi - angleMin)/angleInc)); //offsetting sensor angles so they start at 0 for estimating sensor index of angle phi
+            float senseAngle = angleMin + senseIndex*angleInc; //get true sensor angle based on index
             if( r > scanner.getScan(senseIndex)+resolution/2 || fabs(phi-senseAngle) > M_PI/180){ //filter out unknown scans
                 //sensing range doesn't reach grid cell, scan angle mismatch with beam [1 degree width beam])
                 //do nothing for scans outside of grid cell resolution
             }
-            else if( scanner.getScan(senseIndex) < scanner.getRangeMax() && fabs(scanner.getScan(senseIndex)-r) < resolution/2) {
+            else if( scanner.getScan(senseIndex) < rangeMax && fabs(scanner.getScan(senseIndex)-r) < resolution/2) {
               totalVal = map[i][j] + 100;
               globalVals.push_back(map[i][j]);
               localVals.push_back(100);
@@ -123,14 +129,20 @@ void OccGrid::updateGrid(std::array<float,3> predictPose, LaserScanner scanner){
   float angleMin = scanner.getAngleMin();
   float angleMax = scanner.getAngleMax();
   float angleInc = scanner.getAngleInc();
+
   for(int i = 0; i < width; i++){
     for(int j = 0; j < height; j++){
       //calculate center of mass of grid marker
-      float xi = resolution*(i-0.5);
-      float yi = resolution*(j-0.5);
+      float xi = resolution*((i+1)-0.5);
+      float yi = resolution*((j+1)-0.5);
+
       float r = sqrt(pow(xi - predictPose[0], 2) + pow(yi - predictPose[1], 2)); //distance from robot to grid cell
+
       if(r < rangeMax && r > rangeMin){      //if scanner is within range of cell (don't check cells that aren't in scanner range)
         float phi = atan2(yi - predictPose[1], xi - predictPose[0]) - predictPose[2]; //sensorTheta = measurementTheta - robotTheta (robotTheta is 0 when aligned with Y axis)
+        if(phi < 0){  //sensor range doesn't check negative values but atan2 returns negative values
+          phi += M_PI;
+        }
         if(phi > angleMin && phi < angleMax) {  //check if phi is within range of sensor scan
           int senseIndex = int(round((phi - angleMin)/angleInc)); //offsetting sensor angles so they start at 0 for estimating sensor index of angle phi
           float senseAngle = angleMin + senseIndex*angleInc; //get true sensor angle based on index
@@ -147,6 +159,17 @@ void OccGrid::updateGrid(std::array<float,3> predictPose, LaserScanner scanner){
             } else {
             map[i][j] = map[i][j] + loccupied;  //if sensing within resolution of the grid cell, adjust to occupied
             }
+            /*
+            ROS_INFO("Map Update %d, %d to %d", i,j, map[i][j]);
+            ROS_INFO("RangeMax = %f, RangeMin = %f, AngleMin = %f, AngleMax = %f, AngleInc = %f", rangeMax, rangeMin, angleMin, angleMax, angleInc);
+            ROS_INFO("PredictPose = %f, %f, %f ", predictPose[0], predictPose[1], predictPose[2]);
+            ROS_INFO("Cell Position = %f, %f", xi, yi);
+            ROS_INFO("Distance = %f", r);
+            ROS_INFO("Phi = %f", phi);
+            ROS_INFO("SenseIndex = %d", senseIndex);
+            ROS_INFO("SenseAngle = %f", senseAngle);
+            ROS_INFO("ScannerValue at senseIndex = %f, fabs(phi-senseAngle) = %f", scanner.getScan(senseIndex), fabs(phi-senseAngle));
+            */
           }
           else if( r < scanner.getScan(senseIndex)){  //if sensing distance past the cell, this cell must be free
             if(map[i][j] == -1) {
@@ -157,6 +180,7 @@ void OccGrid::updateGrid(std::array<float,3> predictPose, LaserScanner scanner){
             } else {
             map[i][j] = map[i][j] + lfree;
             }
+            //ROS_INFO("Map Update %d, %d to %d", i,j, map[i][j]);
           }
 
         }
@@ -171,7 +195,7 @@ std::vector<signed char> OccGrid::getFlattenedMap(){
   for(int i = 0; i < height; i++){
     for(int j = 0; j < width; j++){
       //flatMap[(10*i)+j] = map[i][j];
-      flatMap.push_back(map[i][j]);
+      flatMap.push_back((signed char)map[i][j]);
     }
   }
   return flatMap;
@@ -187,4 +211,12 @@ int OccGrid::getWidth(){
 
 int OccGrid::getHeight(){
   return height;
+}
+
+float OccGrid::getRobotXOffset(){
+  return robotXOffset;
+}
+
+float OccGrid::getRobotYOffset(){
+  return robotYOffset;
 }

@@ -12,7 +12,7 @@ class Particle{
     float alpha1 = 0.1;
     float alpha2 = 0.1;
     float alpha3 = 0.1;
-    float alpha4 = 0.1;
+    float alpha4 = 0.2;
     float alpha5 = 0.01;
     float alpha6 = 0.01;
 

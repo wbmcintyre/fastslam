@@ -37,7 +37,7 @@ float Particle::noise_sample(float b) { //create noise from -b to b
   float noise = 0;
   float rootB = sqrt(b);
   for(int i = 0; i < 12; i++){
-    noise = noise + ((float)rand()/(float)RAND_MAX) * (2*rootB) - rootB;
+    noise = noise + ((float)(rand()+1)/(float)RAND_MAX) * (2*rootB) - rootB;
   }
   return 0.5 * noise;
 }
@@ -46,7 +46,7 @@ void Particle::addNoise(){
   pose[0] = pose[0] + noise_sample(.1);
   pose[1] = pose[1] + noise_sample(.1);
   pose[2] = pose[2] + noise_sample(.01);
-  ROS_INFO("Noise x, y, theta: %f %f %f", pose[0], pose[1], pose[2] );
+  //ROS_INFO("Noise x, y, theta: %f %f %f", pose[0], pose[1], pose[2] );
 }
 
 OccGrid Particle::getMap(){

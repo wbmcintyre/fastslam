@@ -10,7 +10,7 @@
 
 
 OccGrid::OccGrid(){
-  for(int i =0; i < map.size(); i++){
+  for(int i =0; i < static_cast<int>(map.size()); i++){
     map[i].fill(-1); //set values of map to -1 (unknown value)
   }
 }
@@ -21,8 +21,8 @@ float OccGrid::getWeightByMeasurements(std::array<float,3> pose, LaserScanner sc
   float totalVal = 0;
   int maxX = 0;
   int maxY = 0;
-  int minX = map.size();
-  int minY = map.size();
+  int minX = static_cast<int>(map.size());
+  int minY = static_cast<int>(map.size());
   int x,y;
   std::vector<float> globalVals;
   std::vector<float> localVals;
@@ -106,14 +106,14 @@ float OccGrid::getWeightByMeasurements(std::array<float,3> pose, LaserScanner sc
   }
 
   if(globalVals.empty()){ //if no matches or bad scan, return very low weight
-    return .0001;
+    return 0;
   }
   //calculating the map matching probability
-  float avgVal = totalVal / (2*globalVals.size());
+  float avgVal = totalVal / (2*static_cast<float>(globalVals.size()));
   float numerator = 0;
   float sumGlobalDiff = 0;
   float sumLocalDiff = 0;
-  for(int i = 0; i < globalVals.size(); i++){
+  for(int i = 0; i < static_cast<int>(globalVals.size()); i++){
     numerator += ((globalVals.at(i)-avgVal)*(localVals.at(i)-avgVal));
     sumGlobalDiff += pow(globalVals.at(i)-avgVal,2);
     sumLocalDiff += pow(localVals.at(i)-avgVal,2);
@@ -144,7 +144,7 @@ void OccGrid::updateGrid(std::array<float,3> predictPose, LaserScanner scanner){
         if(phi < 0){  //sensor range doesn't check negative values but atan2 returns negative values
           phi += 2*M_PI;
         }
-        //ROS_INFO("X, Y, R, phi: %f %f %f %f", xi, yi, r, phi);
+        //ROS_INFO("X, Y, T, Xi, Yi, R, phi: %f %f %f %f %f %f %f", predictPose[0], predictPose[1], predictPose[2], xi, yi, r, phi);
         if(phi > angleMin && phi < angleMax) {  //check if phi is within range of sensor scan
           int senseIndex = int(round((phi - angleMin)/angleInc)); //offsetting sensor angles so they start at 0 for estimating sensor index of angle phi
           float senseAngle = angleMin + senseIndex*angleInc; //get true sensor angle based on index
@@ -196,7 +196,7 @@ std::vector<signed char> OccGrid::getFlattenedMap(){
   std::vector<signed char> flatMap;
   for(int i = 0; i < height; i++){      //push back in row major order
     for(int j = 0; j < width; j++){
-      flatMap.push_back((signed char)map[i][j]);
+      flatMap.push_back((signed char)map[j][i]);
     }
   }
   return flatMap;

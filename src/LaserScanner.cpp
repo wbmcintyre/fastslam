@@ -11,7 +11,7 @@ LaserScanner::LaserScanner(std::vector<float> scan, float angleMin, float angleM
     angle_increment = angleInc;
     range_min = rangeMin;
     range_max = rangeMax;
-    scanSize = scan.size();
+    scanSize = static_cast<int>(scan.size());
 }
 
 void LaserScanner::setScan(std::vector<float> scan){

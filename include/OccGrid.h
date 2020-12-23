@@ -14,20 +14,19 @@ class OccGrid {
     std::array<std::array<int,100>,100> map; //2d grid of values ranging from 0 to 100 with -1 as unknown
     float loccupied = 40.0;
     float lfree = -40.0;
-    float robotXOffset = width/2.0; //initial robot position in map
-    float robotYOffset = height/2.0;
+    float mapXOffset = width/2.0; //initial robot position in map
+    float mapYOffset = height/2.0;
 
   public:
-    //OccGrid(float, int, int);
-    //OccGrid();
+    OccGrid();
     float getWeightByMeasurements(std::array<float,3> pose, LaserScanner scanner);
     void updateGrid(std::array<float,3> predictPose, LaserScanner scanner);
     std::vector<signed char> getFlattenedMap();
     float getResolution();
     int getWidth();
     int getHeight();
-    float getRobotXOffset();
-    float getRobotYOffset();
+    float getMapCenterX();
+    float getMapCenterY();
 
 };
 

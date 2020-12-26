@@ -12,10 +12,10 @@ class OccGrid {
 	  int width = 200;  //default 40 by 40 meter grid based on default resolution
 		int height = 200;
     std::array<std::array<int,200>,200> map; //2d grid of values ranging from 0 to 100 with -1 as unknown
-    float loccupied = 40.0;
-    float lfree = -20.0;
+    float loccupied = 20.0;
+    float lfree = -5.0;
     float mapXOffset = width/2.0; //initial robot position in map
-    float mapYOffset = height/2.0;
+    float mapYOffset = height/2.0
 
   public:
     OccGrid();

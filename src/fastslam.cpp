@@ -6,6 +6,7 @@
 #include <nav_msgs/OccupancyGrid.h>
 #include <geometry_msgs/PoseArray.h>
 #include <geometry_msgs/Twist.h>
+#include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/Pose.h>
 #include <sensor_msgs/LaserScan.h>
 #include <array>
@@ -34,6 +35,8 @@ std::array<float,2> velocities = {0.0,0.0}; //initialize command velocities (u)
 LaserScanner scanner;
 std::vector<Particle> particleList;
 bool firstScan = true;
+bool firstUpdateVel = false;
+bool firstUpdateScan = false;
 bool waitScanner = true;
 bool waitCmdVel = true;
 float mapXOffset;
@@ -44,6 +47,10 @@ float mapYOffset;
 ros::Time curTime;
 float deltaTime = 0.1;
 bool firstDelta = true;
+float totalLinearDist = 0;
+float totalAngularDist = 0;
+float totalDeltaTime = 0;
+int velCmdCount = 0;
 
 //obtain the most probable particle to display on rviz
 Particle bestParticle;
@@ -57,7 +64,7 @@ std::vector<geometry_msgs::Pose> poses;
 void initializeParticles(){
   OccGrid map;
   map.updateGrid(initPose, scanner);
-  for(int i = 0; i < 100; i++){    //initialize array of particles
+  for(int i = 0; i < 500; i++){    //initialize array of particles
     Particle initialParticle(initPose, map);
     //initialParticle.addNoise();
     particleList.push_back(initialParticle);
@@ -82,17 +89,36 @@ void addParticleToPoseArray(std::array<float,3> particlePose){    //adds pose in
 //collect current command velocity values to predict robot pose
 void velocityCallback(const geometry_msgs::Twist::ConstPtr& msg){
 
+
   velocities[0] = msg->linear.x;
   velocities[1] = msg->angular.z;
   ros::Time newTime = ros::Time::now();
   deltaTime = (newTime - curTime).toSec();
   curTime = newTime;
   ROS_INFO("Received Vel");
-  waitCmdVel = false;
-  if(firstDelta == true){ //first time interval doesn't calculate correctly
+  if(firstDelta == true){ //first time interval doesn't calculate correctly (need to figure out this issue)
     deltaTime = 0.1;
     firstDelta = false;
+    firstUpdateVel = true;
   }
+  totalLinearDist += velocities[0]*deltaTime;
+  totalAngularDist += velocities[1]*deltaTime;
+  totalDeltaTime += deltaTime;
+  velCmdCount++;
+
+  if((totalLinearDist < .05 && totalLinearDist > -.05) && (totalAngularDist < .2 && totalAngularDist > -.2)){  //only run the particle filter after the robot has moved a certain distance
+    waitCmdVel = true;
+    ROS_INFO("Linear,Angular Dist: %f, %f", totalLinearDist, totalAngularDist);
+  } else {
+    velocities[0] = totalLinearDist/velCmdCount;  //set velocity values as average velocity
+    velocities[1] = totalAngularDist/velCmdCount;
+    deltaTime = totalDeltaTime;
+    totalLinearDist = 0;
+    totalAngularDist = 0;
+    waitCmdVel = false;
+  }
+
+
 }
 
 //collect laser scan values for measurement matching
@@ -103,12 +129,13 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg){
     float angleMin = msg->angle_min;
     float angleMax = msg->angle_max;
     float angleInc = msg->angle_increment;
-    float rangeMin = msg->range_min;
+    float rangeMin = msg->range_min;   //overwrite due to robot seeing itself (value based on urdf file)
     float rangeMax = msg->range_max;
     scanner = LaserScanner(scan, angleMin, angleMax, angleInc, rangeMin, rangeMax);
     ROS_INFO("INITIALIZING PARTICLES");
     initializeParticles();
     firstScan = false;
+    firstUpdateScan = true;
   } else {
     scanner.setScan(scan);
   }
@@ -144,12 +171,15 @@ void particleFilter() {
       bestParticle = Particle(predictPose,updatedMap); //set bestParticle to be used for publishing map later
       maxWeightIndex = i;
     }
+    //ROS_INFO("Weight: %f, X,Y,T: %f,%f,%f", weight[i], predictPose[0], predictPose[1], predictPose[2]);
   }
 
+  ROS_INFO("BestParticlePose x,y,t : %f %f %f", bestParticle.getPose()[0], bestParticle.getPose()[1], bestParticle.getPose()[2]);
+  ROS_INFO("MaxWeight : %f", weight[maxWeightIndex]);
   for(int j = 0; j < static_cast<int>(particleList.size()); j++){
     weight[j] = weight[j]/weightSum;
   }
-  ROS_INFO("BestParticlePose x,y,t : %f %f %f", bestParticle.getPose()[0], bestParticle.getPose()[1], bestParticle.getPose()[2]);
+
 
   //resample particles based on weights
   ROS_INFO("Resampling");
@@ -165,7 +195,6 @@ void particleFilter() {
     }
     partListResample.push_back(partListSample.at(index)); //set resampled values into new particle list
     addParticleToPoseArray(partListSample.at(index).getPose()); //add particle to pose array
-    ROS_INFO("Weight: %f, X,Y,T: %f,%f,%f", weight[index], partListSample.at(index).getPose()[0], partListSample.at(index).getPose()[1], partListSample.at(index).getPose()[2]);
   }
   ROS_INFO("PF Done");
   particleList = partListResample;
@@ -194,7 +223,7 @@ int main( int argc, char** argv) {
   //publish to map topic and particles topic
   ros::Publisher mapPub = n.advertise<nav_msgs::OccupancyGrid>("map", 1);
   ros::Publisher posePub = n.advertise<geometry_msgs::PoseArray>("particles",1);
-
+  ros::Publisher bestPosePub = n.advertise<geometry_msgs::PoseStamped>("bestPose",1);
 
   //information needed for publishing OccupancyGrid
   nav_msgs::OccupancyGrid bestMap;
@@ -212,18 +241,28 @@ int main( int argc, char** argv) {
   bestMap.info.width = map.getWidth();
   bestMap.info.height = map.getHeight();
 
-  //information neede for publishing PoseArray of particles
+  //information needed for publishing PoseArray of particles
   geometry_msgs::PoseArray poseArr;
   poseArr.header.seq = 1;
   poseArr.header.stamp = ros::Time::now();
   poseArr.header.frame_id = "odom";
 
+  //information needed for publishing Pose of best particle
+  geometry_msgs::PoseStamped bestPose;
+  bestPose.header.seq = 1;
+  bestPose.header.stamp = ros::Time::now();
+  bestPose.header.frame_id = "odom";
+
+
   //endlessly run the particle filter
   while(ros::ok){
     ros::spinOnce();  //get subscriber information
-    if(!waitScanner && !waitCmdVel){
+    if((!waitScanner && !waitCmdVel) || (firstUpdateVel && firstUpdateScan)){ //run when initialized, otherwise wait until callbacks are called
 
       particleFilter();  //run particle filter
+      firstUpdateVel = false;   //used to initialize map prior to robot moving
+      firstUpdateScan = false;
+
 
       //publish to map topic
       bestMap.info.map_load_time = ros::Time::now();
@@ -238,7 +277,19 @@ int main( int argc, char** argv) {
       poseArr.poses = poses;
       posePub.publish(poseArr);
 
-      ROS_INFO("Published Map");
+      //publish best estimated pose
+      std::array<float,3> bp = bestParticle.getPose();
+      bestPose.pose.position.x = bp[0]-mapXOffset;
+      bestPose.pose.position.y = bp[1]-mapYOffset;
+      bestPose.pose.position.z = 0;
+      bestPose.pose.orientation.w = cos(bp[2]/2);
+      bestPose.pose.orientation.x = 0;
+      bestPose.pose.orientation.y = 0;
+      bestPose.pose.orientation.z = sin(bp[2]/2);
+      bestPosePub.publish(bestPose);
+
+
+      ROS_INFO("Published Info");
       waitScanner = true;   //wait for scan and command velocity
       waitCmdVel = true;
     }

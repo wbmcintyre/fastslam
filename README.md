@@ -3,8 +3,8 @@ This project was created to implement the grid based fastslam algorithm similar 
 
 
 ## Example SLAM images
-![Image1](https://github.com/wbmcintyre/fastslam/blob/main/images/image1.png)
-![Image2](https://github.com/wbmcintyre/fastslam/blob/main/images/image2.png)
+![Image1](https://github.com/wbmcintyre/fastslam/blob/main/images/image1.PNG)
+![Image2](https://github.com/wbmcintyre/fastslam/blob/main/images/image2.PNG)
 
 
 ## Future possibilities

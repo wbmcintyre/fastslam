@@ -1,5 +1,3 @@
-//include ros directories (ros.h, standard msgs, etc..)
-//include other headers
 
 #include <iostream>
 #include <ros/ros.h>
@@ -19,17 +17,6 @@
 
 
 
-/*** Thoughts ****
-
-  - check to see if rosSpinOnce only gets subscriber information once prior to running script
-  - check single/multi thread
-
-  -robot offset in occupancy grid (measurement and update grid)
-
-  -test order of operations for subscribing/publishing (print statements) ROS_INFO
-
-*/
-
 std::array<float,3> initPose = {0.0,0.0,0.0}; //initialize robot pose (x)
 std::array<float,2> velocities = {0.0,0.0}; //initialize command velocities (u)
 LaserScanner scanner;
@@ -39,6 +26,9 @@ bool firstUpdateVel = false;
 bool firstUpdateScan = false;
 bool waitScanner = true;
 bool waitCmdVel = true;
+bool partFilterFinished = true;
+float robotGazeboOffsetX = -2.0;
+float robotGazeboOffsetY = -0.5;
 float mapXOffset;
 float mapYOffset;
 
@@ -50,21 +40,19 @@ bool firstDelta = true;
 float totalLinearDist = 0;
 float totalAngularDist = 0;
 float totalDeltaTime = 0;
-int velCmdCount = 0;
+
 
 //obtain the most probable particle to display on rviz
 Particle bestParticle;
-
 
 //Array of poses for rviz display
 std::vector<geometry_msgs::Pose> poses;
 
 
-
 void initializeParticles(){
   OccGrid map;
   map.updateGrid(initPose, scanner);
-  for(int i = 0; i < 500; i++){    //initialize array of particles
+  for(int i = 0; i < 300; i++){    //initialize array of particles
     Particle initialParticle(initPose, map);
     //initialParticle.addNoise();
     particleList.push_back(initialParticle);
@@ -73,53 +61,51 @@ void initializeParticles(){
 
 
 void addParticleToPoseArray(std::array<float,3> particlePose){    //adds pose information to pose array for display in rviz
-  geometry_msgs::Pose initPose;
-  initPose.position.x = particlePose[0]-mapXOffset;
-  initPose.position.y = particlePose[1]-mapYOffset;
-  initPose.position.z = 0;
-  initPose.orientation.w = cos(particlePose[2]/2);
-  initPose.orientation.x = 0;
-  initPose.orientation.y = 0;
-  initPose.orientation.z = sin(particlePose[2]/2);
-  poses.push_back(initPose);
+  geometry_msgs::Pose initGeomPose;
+  initGeomPose.position.x = particlePose[0]-mapXOffset;
+  initGeomPose.position.y = particlePose[1]-mapYOffset;
+  initGeomPose.position.z = 0;
+  initGeomPose.orientation.w = cos(particlePose[2]/2);
+  initGeomPose.orientation.x = 0;
+  initGeomPose.orientation.y = 0;
+  initGeomPose.orientation.z = sin(particlePose[2]/2);
+  poses.push_back(initGeomPose);
 }
-
-
 
 //collect current command velocity values to predict robot pose
 void velocityCallback(const geometry_msgs::Twist::ConstPtr& msg){
 
 
-  velocities[0] = msg->linear.x;
-  velocities[1] = msg->angular.z;
   ros::Time newTime = ros::Time::now();
-  deltaTime = (newTime - curTime).toSec();
+  float intervalTime = (newTime - curTime).toSec();
   curTime = newTime;
-  ROS_INFO("Received Vel");
+  //ROS_INFO("Received Vel");
   if(firstDelta == true){ //first time interval doesn't calculate correctly (need to figure out this issue)
-    deltaTime = 0.1;
+    intervalTime = 0.1;
     firstDelta = false;
     firstUpdateVel = true;
   }
-  totalLinearDist += velocities[0]*deltaTime;
-  totalAngularDist += velocities[1]*deltaTime;
-  totalDeltaTime += deltaTime;
-  velCmdCount++;
 
-  if((totalLinearDist < .05 && totalLinearDist > -.05) && (totalAngularDist < .2 && totalAngularDist > -.2)){  //only run the particle filter after the robot has moved a certain distance
+  totalLinearDist += msg->linear.x*intervalTime;
+  totalAngularDist += msg->angular.z*intervalTime;
+  totalDeltaTime += intervalTime;
+
+  if((totalLinearDist < .01 && totalLinearDist > -.01) && (totalAngularDist < .01 && totalAngularDist > -.01)){  //only run the particle filter after the robot has moved a certain distance
     waitCmdVel = true;
-    ROS_INFO("Linear,Angular Dist: %f, %f", totalLinearDist, totalAngularDist);
-  } else {
-    velocities[0] = totalLinearDist/velCmdCount;  //set velocity values as average velocity
-    velocities[1] = totalAngularDist/velCmdCount;
+  } else if (partFilterFinished && !waitScanner){   //if the robot has moved and the particle filter has finished running, set new velocities
+    velocities[0] = totalLinearDist/totalDeltaTime; //set velocity values as average velocity
+    velocities[1] = totalAngularDist/totalDeltaTime;
     deltaTime = totalDeltaTime;
     totalLinearDist = 0;
     totalAngularDist = 0;
+    totalDeltaTime = 0;
     waitCmdVel = false;
+    partFilterFinished = false;
+    ROS_INFO("V, W, dt: %f %f %f",velocities[0], velocities[1], deltaTime);
   }
 
-
 }
+
 
 //collect laser scan values for measurement matching
 void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg){
@@ -136,11 +122,10 @@ void scanCallback(const sensor_msgs::LaserScan::ConstPtr& msg){
     initializeParticles();
     firstScan = false;
     firstUpdateScan = true;
-  } else {
+  } else if (partFilterFinished){
     scanner.setScan(scan);
+    waitScanner = false;
   }
-  waitScanner = false;
-  ROS_INFO("Received Scan");
 
 }
 
@@ -171,14 +156,13 @@ void particleFilter() {
       bestParticle = Particle(predictPose,updatedMap); //set bestParticle to be used for publishing map later
       maxWeightIndex = i;
     }
-    //ROS_INFO("Weight: %f, X,Y,T: %f,%f,%f", weight[i], predictPose[0], predictPose[1], predictPose[2]);
   }
 
-  ROS_INFO("BestParticlePose x,y,t : %f %f %f", bestParticle.getPose()[0], bestParticle.getPose()[1], bestParticle.getPose()[2]);
-  ROS_INFO("MaxWeight : %f", weight[maxWeightIndex]);
   for(int j = 0; j < static_cast<int>(particleList.size()); j++){
     weight[j] = weight[j]/weightSum;
   }
+  ROS_INFO("BestParticlePose x,y,t : %f %f %f", bestParticle.getPose()[0], bestParticle.getPose()[1], bestParticle.getPose()[2]);
+  ROS_INFO("MaxWeight : %f", weight[maxWeightIndex]);
 
 
   //resample particles based on weights
@@ -208,12 +192,14 @@ int main( int argc, char** argv) {
   ros::NodeHandle n;
   curTime = ros::Time::now();
   ros::Rate r(10);
+  ros::AsyncSpinner spinner(0);
+  spinner.start();
 
   OccGrid map;  //initialize empty occupancyGrid
   mapXOffset = map.getMapCenterX();
   mapYOffset = map.getMapCenterY();
-  initPose[0] = mapXOffset-2.0;  //set robot pose offset to center map in rviz (according to gazebo file)
-  initPose[1] = mapYOffset-0.5;
+  initPose[0] = mapXOffset+robotGazeboOffsetX;  //set robot pose offset to center map in rviz (according to gazebo file)
+  initPose[1] = mapYOffset+robotGazeboOffsetY;
   initPose[2] = 0; //easier for rviz visualization (optional to rotate map instead)
 
   //subscribe to command velocity and laser scanner
@@ -256,7 +242,6 @@ int main( int argc, char** argv) {
 
   //endlessly run the particle filter
   while(ros::ok){
-    ros::spinOnce();  //get subscriber information
     if((!waitScanner && !waitCmdVel) || (firstUpdateVel && firstUpdateScan)){ //run when initialized, otherwise wait until callbacks are called
 
       particleFilter();  //run particle filter
@@ -292,8 +277,11 @@ int main( int argc, char** argv) {
       ROS_INFO("Published Info");
       waitScanner = true;   //wait for scan and command velocity
       waitCmdVel = true;
+      partFilterFinished = true;
     }
   }
+
+  ros::waitForShutdown();
 
 
 }

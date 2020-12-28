@@ -3,6 +3,7 @@
 #include <math.h>
 #include "LaserScanner.h"
 #include "OccGrid.h"
+//#include "Point.h"
 
 #include <vector>
 #include <array>
@@ -15,7 +16,6 @@ OccGrid::OccGrid(){
   for(int i =0; i < static_cast<int>(map.size()); i++){
     map[i].fill(0); //log odds value of map
     smoothedMap[i].fill(-1); //set values of map to -1 (unknown value) (range 0 to 1)
-    probMap[i].fill(0.5); //convert log odds to probability of map
   }
 }
 
@@ -40,16 +40,15 @@ float OccGrid::getWeightByMeasurements(std::array<float,3> pose, LaserScanner sc
   float totalBlackVal = 0;
   int blackCounts = 0;
   int whiteCounts = 0;
-
-
   //get min and max X and Y values so the entire grid doesn't need to be searched
+
   for(int k = 0; k < scanner.getScanSize(); k++){
     float r = scanner.getScan(k);
     if(r < rangeMax && r > rangeMin){   //filter out bad laser scanner values
       x = int(round((pose[0] + r*cos(pose[2]+angleMin+(k*angleInc)))/resolution));   //global map coordinates of scan
       y = int(round((pose[1] + r*sin(pose[2]+angleMin+(k*angleInc)))/resolution));
 
-      //get the min and max X and Y values that the scanner reaches
+      //get the min and max X and Y values
       if(x > maxX) {
         maxX = x;
       }
@@ -65,16 +64,15 @@ float OccGrid::getWeightByMeasurements(std::array<float,3> pose, LaserScanner sc
     }
 
   }
-
+  //ROS_INFO("minX = %d, maxX = %d, minY = %d, maxY = %d", minX, maxX, minY, maxY);
   //to prevent segmentation faults, we limit the search to the map boundaries
   if(maxX > map.size()){ maxX = map.size(); }
   if(maxY > map.size()){ maxY = map[0].size(); }
   if(minX < 0){ minX = 0; }
   if(minY < 0){ minY = 0; }
-
   //look within the min and max X and Y coordinates for map matching
-  for(int i = minX + 1; i <= maxX - 1; i++){
-    for(int j = minY + 1; j <= maxY - 1; j++){
+  for(int i = minX; i <= maxX; i++){
+    for(int j = minY; j <= maxY; j++){
       //calculate center of mass of grid marker
       if(smoothedMap[i][j] != -1) {
         float xi = resolution*((i+1)-0.5);  //grid cell center of mass
@@ -93,38 +91,19 @@ float OccGrid::getWeightByMeasurements(std::array<float,3> pose, LaserScanner sc
                 //do nothing for scans outside of grid cell resolution
             }
             else if( scanner.getScan(senseIndex) < rangeMax && fabs(scanner.getScan(senseIndex)-r) < resolution/2) {
-
-              float mapProb = 0;
-              int cellCount = 0;
-              for(int k = i-1; k <= i+1; k++){  //compare guassian smoothed map to laser scanner
-                for(int l = j-1; l <= j+1; l++){
-                  if(smoothedMap[k][l] != -1){  //if cell has been initialized
-                    mapProb += probMap[k][l];
-                    cellCount++;
-                  }
-                }
-              }
-              mapProb = mapProb/cellCount;
-              totalVal += mapProb + 1;
-              globalVals.push_back(mapProb);
+              totalVal += map[i][j] + 100;
+              globalVals.push_back(1-(1/(1+exp(map[i][j]))));
               localVals.push_back(1);
+              //totalBlackVal += 100 - map[i][j];
+              //blackCounts ++;
 
             }
             else if( r < scanner.getScan(senseIndex) ){  //if sensing distance past the cell, this cell must be free
-              float mapProb = 0;
-              int cellCount = 0;
-              for(int k = i-1; k <= i+1; k++){  //compare guassian smoothed map to laser scanner
-                for(int l = j-1; l <= j+1; l++){
-                  if(smoothedMap[k][l] != -1){
-                    mapProb += probMap[k][l];
-                    cellCount++;
-                  }
-                }
-              }
-              mapProb = mapProb/cellCount;
-              totalVal += mapProb + 0;
-              globalVals.push_back(mapProb);
+              totalVal += map[i][j] + 0;
+              globalVals.push_back(1-(1/(1+exp(map[i][j]))));
               localVals.push_back(0);
+              //totalWhiteVal += map[i][j];
+              //whiteCounts ++;
 
             }
           }
@@ -133,11 +112,19 @@ float OccGrid::getWeightByMeasurements(std::array<float,3> pose, LaserScanner sc
     }
   }
 
+  /*
+  int totalCounts = whiteCounts + blackCounts;
+  float percBlkCorrect = 1 - (totalBlackVal/(blackCounts*100));
+  float percWhtCorrect = 1 - (totalWhiteVal/(whiteCounts*100));
+  ROS_INFO("Blk perc: %f , C: %d", percBlkCorrect, blackCounts);
+  ROS_INFO("Wht perc: %f , C: %d", percWhtCorrect, whiteCounts);
+  return percBlkCorrect*percWhtCorrect;
+  */
+
 
   if(globalVals.empty()){ //if no matches or bad scan, return very low weight
     return 0;
   }
-
   //calculating the map matching probability
   float avgVal = totalVal / (2*static_cast<float>(globalVals.size()));
   float numerator = 0;
@@ -153,6 +140,84 @@ float OccGrid::getWeightByMeasurements(std::array<float,3> pose, LaserScanner sc
 
 }
 
+/*
+float OccGrid::getWeightByMeasurements(std::array<float,3> pose, LaserScanner scanner){
+  float totalVal = 0;
+  int x,y;
+  int numMatches = 0;
+  std::vector<float> globalVals;
+  std::vector<float> localVals;
+  float rangeMax = scanner.getRangeMax();
+  float rangeMin = scanner.getRangeMin();
+  float angleMin = scanner.getAngleMin();
+  float angleInc = scanner.getAngleInc();
+
+  for(int k = 0; k < scanner.getScanSize(); k++){
+    float r = scanner.getScan(k);
+    float angle = pose[2]+angleMin+(k*angleInc);
+    if(r < rangeMax && r > rangeMin){   //filter out bad laser scanner values
+      x = int(round((pose[0] + r*cos(angle))/resolution));   //global map coordinates of scan
+      y = int(round((pose[1] + r*sin(angle))/resolution));
+      if(map[x][y] != -1) {
+        totalVal += 100 - map[x][y];
+        numMatches++;
+      }
+    }
+    //ROS_INFO("R, Angle, X, Y, Xi, Yi %f %f %f %f %d %d", r, angle, pose[0], pose[1], x, y );
+  }
+
+
+  return (1 - (totalVal)/(numMatches*100));
+
+}*/
+/*
+float OccGrid::getWeightByMeasurements(std::array<float,3> pose, LaserScanner scanner){
+
+  int x,y;
+  float sumDistErr = 0;
+  float rangeMax = scanner.getRangeMax();
+  float rangeMin = scanner.getRangeMin();
+  float angleMin = scanner.getAngleMin();
+  float angleInc = scanner.getAngleInc();
+
+  for(int k = 0; k < scanner.getScanSize(); k++){
+    float r = scanner.getScan(k);
+    float angle = pose[2]+angleMin+(k*angleInc);
+    if(r < rangeMax && r > rangeMin){   //filter out bad laser scanner values
+      x = int(round((pose[0] + r*cos(angle))/resolution));   //global map coordinates of scan
+      y = int(round((pose[1] + r*sin(angle))/resolution));
+
+      float sqDist = pow(width,2)*pow(height,2);
+      float testDist;
+
+      for(auto p : pointcloud){
+        testDist = pow((p[0]-x),2)+pow((p[1]-y),2);
+        if(testDist < sqDist){
+          sqDist = testDist;
+        }
+      }
+      sumDistErr += sqrt(sqDist);
+
+      /*Point newPoint(x,y);
+      float sqDist = pow(width,2)*pow(height,2);
+      float testDist;
+
+      //search list of map set to find minimum distance to occupied cell
+      for(auto p : mapSet){
+        testDist = pow((p.x-x),2)+pow((p.y-y),2);
+        if(testDist < sqDist){
+          sqDist = testDist;
+        }
+      }
+      sumDistErr += sqrt(sqDist);
+    }
+  }
+
+  ROS_INFO("DistErr: %f", sumDistErr);
+  return (1/(1 + sumDistErr));
+
+}*/
+
 void OccGrid::updateGrid(std::array<float,3> predictPose, LaserScanner scanner){
 
   float rangeMax = scanner.getRangeMax();
@@ -160,11 +225,11 @@ void OccGrid::updateGrid(std::array<float,3> predictPose, LaserScanner scanner){
   float angleMin = scanner.getAngleMin();
   float angleMax = scanner.getAngleMax();
   float angleInc = scanner.getAngleInc();
-  int locc = loccupied;
+  /*int locc = loccupied;
   if(firstUpdate){
     locc = loccfirst;
     firstUpdate = false;
-  }
+  }*/
 
   for(int i = 0; i < width; i++){
     for(int j = 0; j < height; j++){
@@ -179,6 +244,7 @@ void OccGrid::updateGrid(std::array<float,3> predictPose, LaserScanner scanner){
         if(phi < 0){  //sensor range doesn't check negative values but atan2 returns negative values
           phi += 2*M_PI;
         }
+        //ROS_INFO("X, Y, T, Xi, Yi, R, phi: %f %f %f %f %f %f %f", predictPose[0], predictPose[1], predictPose[2], xi, yi, r, phi);
         if(phi > angleMin && phi < angleMax) {  //check if phi is within range of sensor scan
           int senseIndex = int(round((phi - angleMin)/angleInc)); //offsetting sensor angles so they start at 0 for estimating sensor index of angle phi
           float senseAngle = angleMin + senseIndex*angleInc; //get true sensor angle based on index
@@ -188,17 +254,49 @@ void OccGrid::updateGrid(std::array<float,3> predictPose, LaserScanner scanner){
           }
           else if( scanner.getScan(senseIndex) < rangeMax && fabs(scanner.getScan(senseIndex)-r) < resolution/2) {
             if(smoothedMap[i][j] == -1) {
-              smoothedMap[i][j] = 0;     //grid cell is initialized
-            }
+              smoothedMap[i][j] = 0; //grid cell is initialized
+            }/*
+            if(map[i][j] < setAddThresh && map[i][j] + locc >= setAddThresh){
+              std::array<int,2> pAdd = {i,j};
+              pointcloud.push_back(pAdd);
+              //Point p(i,j);
+              //mapSet.insert(p);
+            }*/
             map[i][j] = map[i][j] + locc;  //if sensing within resolution of the grid cell, adjust to occupied
-            probMap[i][j] = (1-(1/(1+exp(map[i][j]))));
+            /*if(map[i][j] > 100){ //constrain map values from 0 to 100 once initialized
+              map[i][j] = 100;
+            }*/
+            /*
+            ROS_INFO("Map Update %d, %d to %d", i,j, map[i][j]);
+            ROS_INFO("RangeMax = %f, RangeMin = %f, AngleMin = %f, AngleMax = %f, AngleInc = %f", rangeMax, rangeMin, angleMin, angleMax, angleInc);
+            ROS_INFO("PredictPose = %f, %f, %f ", predictPose[0], predictPose[1], predictPose[2]);
+            ROS_INFO("Cell Position = %f, %f", xi, yi);
+            ROS_INFO("Distance = %f", r);
+            ROS_INFO("Phi = %f", phi);
+            ROS_INFO("SenseIndex = %d", senseIndex);
+            ROS_INFO("SenseAngle = %f", senseAngle);
+            ROS_INFO("ScannerValue at senseIndex = %f, fabs(phi-senseAngle) = %f", scanner.getScan(senseIndex), fabs(phi-senseAngle));
+            */
           }
           else if( r < scanner.getScan(senseIndex)){  //if sensing distance past the cell, this cell must be free
             if(smoothedMap[i][j] == -1) {
-              smoothedMap[i][j] = 0;     //grid cell is initialized
+              smoothedMap[i][j] = 0;    //grid cell is initialized
             }
+            /*
+            if(map[i][j] > setRemThresh && map[i][j] + lfree <= setRemThresh){
+              for(int i = 0; i < pointcloud.size(); i++){
+                if(pointcloud.at(i)[0] == i && pointcloud.at(i)[1] == j){
+                  pointcloud.erase(pointcloud.begin()+i);
+                }
+              }
+              //Point p(i,j);
+              //mapSet.erase(p);
+            }*/
             map[i][j] = map[i][j] + lfree;
-            probMap[i][j] = (1-(1/(1+exp(map[i][j]))));
+            /*if(map[i][j] < 0){ //constrain map values from 0 to 100 once initialized
+              map[i][j] = 0;
+            }*/
+            //ROS_INFO("Map Update %d, %d to %d", i,j, map[i][j]);
           }
 
         }
@@ -206,16 +304,17 @@ void OccGrid::updateGrid(std::array<float,3> predictPose, LaserScanner scanner){
 
     }
   }
+  //ROS_INFO("Pointcloud Size: %d", static_cast<int>(pointcloud.size()));
 }
 
 std::vector<signed char> OccGrid::getFlattenedMap(){
   std::vector<signed char> flatMap;
   for(int i = 0; i < height; i++){      //push back in row major order
     for(int j = 0; j < width; j++){
-      if(smoothedMap[j][i] == -1) {
+      if(smoothedMap[i][j] == -1) {
         flatMap.push_back(-1);
       } else {
-        flatMap.push_back((signed char)(probMap[j][i]*100));
+        flatMap.push_back((signed char)(1-(1/(1+exp(map[j][i]))))*100);
       }
     }
   }

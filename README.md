@@ -3,14 +3,14 @@ This project was created to implement the grid based fastslam algorithm similar 
 
 
 ## Example SLAM images
-(/images/image1.png?raw=true)
-(/images/image2.png?raw=true)
-(/images/image3.png?raw=true)
-(/images/image4.png?raw=true)
-(/images/image5.png?raw=true)
-(/images/image6.png?raw=true)
-(/images/image7.png?raw=true)
-(/images/image8.png?raw=true)
+(images/image1.png)
+(images/image2.png)
+(images/image3.png)
+(images/image4.png)
+(images/image5.png)
+(images/image6.png)
+(images/image7.png)
+(/images/image8.png)
 
 ## Future possibilities
 - ICP for better localization

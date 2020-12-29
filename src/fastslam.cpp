@@ -19,6 +19,7 @@
 
 std::array<float,3> initPose = {0.0,0.0,0.0}; //initialize robot pose (x)
 std::array<float,2> velocities = {0.0,0.0}; //initialize command velocities (u)
+int numParticles = 300;
 LaserScanner scanner;
 std::vector<Particle> particleList;
 bool firstScan = true;
@@ -52,7 +53,7 @@ std::vector<geometry_msgs::Pose> poses;
 void initializeParticles(){
   OccGrid map;
   map.updateGrid(initPose, scanner);
-  for(int i = 0; i < 300; i++){    //initialize array of particles
+  for(int i = 0; i < numParticles; i++){    //initialize array of particles
     Particle initialParticle(initPose, map);
     //initialParticle.addNoise();
     particleList.push_back(initialParticle);

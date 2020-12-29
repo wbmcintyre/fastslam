@@ -24,19 +24,22 @@ After all of these processes are running, the rostopics for fastslam can be adde
 
 While rviz is on the screen, open up the terminal containing the teloperation control. This can be used to move the robot around and to observe the SLAM algorithm. The particle filter and resampling only occur after the robot has moved .01 meters in any direction. This is to prevent the robot from resampling out poses while not moving. Below are the following parameters that can be adjusted to better increase performance of this current algorithm.
 
-Particle.h file
-  - alpha1 to alpha6 - noise variables used for sampling predicted robot poses
-OccGrid.h file
-  - resolution - change the map resolution (.05 meters by default)
-  - width - change size of map
-  - height
-fastslam.cpp file
+* fastslam.cpp file
   - numParticles - change how many particles 
+* Particle.h file
+  - alpha1 to alpha6 - noise variables used for sampling predicted robot poses
+* OccGrid.h file
+  - resolution - change the map resolution (.05 meters by default)
+  - width, height - change size of map
+  - loccupied, lfree - change how decisive the robot is about determining obstacles
 
 
-## Analysis
-To be done...
 
+## Observations
+
+Although this application does show convergence of the robot, the current run time with 300 particles is suboptimal. If the robot moves too fast around the environment, it can get lost. Also, the current noise variables make it harder for the robot to localize while turning. Lastly, there can be some inconsistency when determining where a wall is. In the example images, it can be seen that as the robot moves, the outside walls become thicker due to estimated localization. 
+
+The primary improvement for this robot can be done with how it creates the weights for resampling. Currently, a correlation mapping technique is used between a gaussian smoothed global map and an unsmoothed local map based off of 1 scan. Without the gaussian smoothing of the global map, the robot wasn't penalized as much for comparing two white spaced areas that weren't actually near each other. In other words, if 95% of the comparison on the map are white space, then the 5% of comparisons where the walls are located aren't taken into consideration as much. It is considerable to use an ICP based approach rather than correlation based approach to inprove localization.
 
 
 ## Example SLAM images
